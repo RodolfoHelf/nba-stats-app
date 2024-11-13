@@ -1,9 +1,23 @@
 import streamlit as st
 import pandas as pd
-
+from io import BytesIO
 from xlsxwriter.utility import xl_col_to_name
+from datetime import datetime
+
+
 from nba_api.live.nba.endpoints._base import Endpoint
 from nba_api.live.nba.library.http import NBALiveHTTP
+
+
+
+
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Dados')
+    # Precisa definir o cursor de volta ao início para leitura
+    output.seek(0)
+    return output.read()
 
 class BoxScore(Endpoint):
     endpoint_url = "boxscore/boxscore_{game_id}.json"
@@ -374,6 +388,14 @@ class BoxScore(Endpoint):
                 self.game_details.pop("awayTeam")
             self.game_details = Endpoint.DataSet(data=self.game_details)
 
+
+st.title("🏀 NBA Stats")
+st.write(
+    "Click in the download button to get the excel file with NBA players stats by team"
+)
+
+file_name = "nba_stats.xlsx"
+
 # Número inicial
 first_game_id = "0022400061"
 
@@ -390,122 +412,161 @@ team_info = {}
 desired_features = ["assists","blocks","fieldGoalsAttempted","fieldGoalsMade","points","reboundsTotal","steals","threePointersAttempted","threePointersMade","turnovers"]
 
 
+# Caminho do arquivo onde a data da última execução será salva
+date_file = 'last_run_date.txt'
+
+# Função para salvar a data/hora atual no arquivo
+def save_last_run_date():
+    with open(date_file, 'w') as f:
+        f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+# Função para carregar a data/hora da última execução
+def load_last_run_date():
+    try:
+        with open(date_file, 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Nunca executado"
+    
+# Carregar a data/hora da última execução
+last_run_date = load_last_run_date()
+st.write(f"Data last execution: {last_run_date}")
 
 
 
-for game_id in all_games_id:
+# Botão para executar o código e salvar a data/hora atual
+if st.button("Update Excel File"):
+    # Aqui você coloca o código que deseja executar ao pressionar o botão
+    st.write("Execute code can take several minutes...")
 
-    try: 
-        home_team_name = BoxScore(game_id).get_dict()["game"]["homeTeam"]["teamName"]
-        home_team_players = BoxScore(game_id).get_dict()["game"]["homeTeam"]["players"]
+    
 
-        home_players_stats = []
-        home_players_name = []
+    for game_id in all_games_id:
 
-        for home_player in home_team_players:
+        try: 
+            home_team_name = BoxScore(game_id).get_dict()["game"]["homeTeam"]["teamName"]
+            home_team_players = BoxScore(game_id).get_dict()["game"]["homeTeam"]["players"]
 
-            player_stats = home_player["statistics"]
-            player_stats_filtered = {chave: player_stats[chave] for chave in desired_features if chave in player_stats}
+            home_players_stats = []
+            home_players_name = []
 
-            player_name = home_player["name"]
+            for home_player in home_team_players:
 
-            home_players_stats.append(player_stats_filtered)
-            home_players_name.append(player_name)
-            home_players_info = (home_players_name,home_players_stats)
-           
+                player_stats = home_player["statistics"]
+                player_stats_filtered = {chave: player_stats[chave] for chave in desired_features if chave in player_stats}
 
-        if home_team_name in team_info.keys():
-            games_updated = team_info[home_team_name]
-            games_updated.append(home_players_info)
-            team_info[home_team_name] = games_updated
-        else:
-            team_info[home_team_name] = [home_players_info]
-        # pd.DataFrame(home_players_stats,home_players_name)
+                player_name = home_player["name"]
 
-        away_team_name = BoxScore(game_id).get_dict()["game"]["awayTeam"]["teamName"]
-        away_team_players = BoxScore(game_id).get_dict()["game"]["awayTeam"]["players"]
+                home_players_stats.append(player_stats_filtered)
+                home_players_name.append(player_name)
+                home_players_info = (home_players_name,home_players_stats)
+            
 
-        away_players_stats = []
-        away_players_name = []
-
-        for away_player in away_team_players:
-
-            player_stats = away_player["statistics"]
-            player_stats_filtered = {chave: player_stats[chave] for chave in desired_features if chave in player_stats}
-
-            player_name = away_player["name"]
-
-            away_players_stats.append(player_stats_filtered)
-            away_players_name.append(player_name)
-            away_players_info = (away_players_name,away_players_stats)
-          
-
-        if away_team_name in team_info.keys():
-            games_updated = team_info[away_team_name]
-            games_updated.append(away_players_info)
-            team_info[away_team_name] = games_updated
-        else:
-            team_info[away_team_name] = [away_players_info]
-        # pd.DataFrame(away_players_stats,away_players_name)
-    except:
-        print(f"O jogo com id {game_id} não foi encontrado")
-        break
-
-
-
-file_name = "nba_stats.xlsx"
-
-with pd.ExcelWriter(file_name, engine='xlsxwriter') as writer:
-    # Configura as cores para alternância
-    cor1 = '#FFFF99'  # Amarelo claro
-    cor2 = '#99CCFF'  # Azul claro
-
-    for team in team_info.keys():
-        # Combina os dados das partidas em um DataFrame único
-        df_merged = pd.DataFrame()
-        df1 = pd.DataFrame(team_info[team][0][1], index=team_info[team][0][0])
-        
-        for game in range(1, len(team_info[team])):
-            df2 = pd.DataFrame(team_info[team][game][1], index=team_info[team][game][0])
-            df_merged = pd.concat([df_merged, df2], axis=1) if game > 1 else pd.concat([df1, df2], axis=1)
-
-        # Salva o DataFrame na aba correspondente, incluindo a coluna de índice
-        df_merged.to_excel(writer, sheet_name=team, index=True)
-        
-        # Obtém o workbook e a aba (worksheet)
-        workbook = writer.book
-        worksheet = writer.sheets[team]
-
-        # Aplica as cores alternadas em cada grupo de 10 colunas (incluindo a coluna de índice)
-        for col_num in range(0, df_merged.shape[1] + 1):  # Inclui a coluna de índice
-            # Define a cor com base no grupo de 10 colunas, ignorando a primeira coluna de índice
-            fill_color = cor1 if (col_num - 1) // 10 % 2 == 0 else cor2
-            col_letter = xl_col_to_name(col_num)  # Converte o número da coluna para a letra correspondente
-
-            # Define o intervalo até a linha 19
-            cell_range = f"{col_letter}2:{col_letter}20"  # Exclui o cabeçalho (linha 1) do intervalo
-
-            # Aplica o formato no intervalo específico
-            fmt = workbook.add_format({'bg_color': fill_color})
-            worksheet.conditional_format(cell_range, {'type': 'no_blanks', 'format': fmt})
-
-            # Ajusta a largura da coluna com base no maior conteúdo da coluna
-            if col_num == 0:
-                # Para a coluna de índice
-                max_length = max([len(str(val)) for val in df_merged.index.astype(str)] + [len("Índice")])
+            if home_team_name in team_info.keys():
+                games_updated = team_info[home_team_name]
+                games_updated.append(home_players_info)
+                team_info[home_team_name] = games_updated
             else:
-                # Para outras colunas
-                max_length = max(
-                    [len(str(cell)) for cell in df_merged.iloc[:, col_num - 1].astype(str)]  # Maior comprimento do conteúdo
-                    + [len(str(df_merged.columns[col_num - 1]))]  # Considera o cabeçalho
-                )
+                team_info[home_team_name] = [home_players_info]
+            # pd.DataFrame(home_players_stats,home_players_name)
 
-            worksheet.set_column(f"{col_letter}:{col_letter}", max_length + 2)  # Define a largura com uma margem
+            away_team_name = BoxScore(game_id).get_dict()["game"]["awayTeam"]["teamName"]
+            away_team_players = BoxScore(game_id).get_dict()["game"]["awayTeam"]["players"]
 
-print("Arquivo Excel criado com ajuste automático da largura das colunas, incluindo o índice!")
+            away_players_stats = []
+            away_players_name = []
+
+            for away_player in away_team_players:
+
+                player_stats = away_player["statistics"]
+                player_stats_filtered = {chave: player_stats[chave] for chave in desired_features if chave in player_stats}
+
+                player_name = away_player["name"]
+
+                away_players_stats.append(player_stats_filtered)
+                away_players_name.append(player_name)
+                away_players_info = (away_players_name,away_players_stats)
+            
+
+            if away_team_name in team_info.keys():
+                games_updated = team_info[away_team_name]
+                games_updated.append(away_players_info)
+                team_info[away_team_name] = games_updated
+            else:
+                team_info[away_team_name] = [away_players_info]
+            # pd.DataFrame(away_players_stats,away_players_name)
+        except:
+            print(f"O jogo com id {game_id} não foi encontrado")
+            break
+    with pd.ExcelWriter(file_name, engine='xlsxwriter') as writer:
+        # Configura as cores para alternância
+        cor1 = '#FFFF99'  # Amarelo claro
+        cor2 = '#99CCFF'  # Azul claro
+
+        for team in team_info.keys():
+            # Combina os dados das partidas em um DataFrame único
+            df_merged = pd.DataFrame()
+            df1 = pd.DataFrame(team_info[team][0][1], index=team_info[team][0][0])
+            
+            for game in range(1, len(team_info[team])):
+                df2 = pd.DataFrame(team_info[team][game][1], index=team_info[team][game][0])
+                df_merged = pd.concat([df_merged, df2], axis=1) if game > 1 else pd.concat([df1, df2], axis=1)
+
+            # Salva o DataFrame na aba correspondente, incluindo a coluna de índice
+            df_merged.to_excel(writer, sheet_name=team, index=True)
+            
+            # Obtém o workbook e a aba (worksheet)
+            workbook = writer.book
+            worksheet = writer.sheets[team]
+
+            # Aplica as cores alternadas em cada grupo de 10 colunas (incluindo a coluna de índice)
+            for col_num in range(0, df_merged.shape[1] + 1):  # Inclui a coluna de índice
+                # Define a cor com base no grupo de 10 colunas, ignorando a primeira coluna de índice
+                fill_color = cor1 if (col_num - 1) // 10 % 2 == 0 else cor2
+                col_letter = xl_col_to_name(col_num)  # Converte o número da coluna para a letra correspondente
+
+                # Define o intervalo até a linha 19
+                cell_range = f"{col_letter}2:{col_letter}20"  # Exclui o cabeçalho (linha 1) do intervalo
+
+                # Aplica o formato no intervalo específico
+                fmt = workbook.add_format({'bg_color': fill_color})
+                worksheet.conditional_format(cell_range, {'type': 'no_blanks', 'format': fmt})
+
+                # Ajusta a largura da coluna com base no maior conteúdo da coluna
+                if col_num == 0:
+                    # Para a coluna de índice
+                    max_length = max([len(str(val)) for val in df_merged.index.astype(str)] + [len("Índice")])
+                else:
+                    # Para outras colunas
+                    max_length = max(
+                        [len(str(cell)) for cell in df_merged.iloc[:, col_num - 1].astype(str)]  # Maior comprimento do conteúdo
+                        + [len(str(df_merged.columns[col_num - 1]))]  # Considera o cabeçalho
+                    )
+
+                worksheet.set_column(f"{col_letter}:{col_letter}", max_length + 2)  # Define a largura com uma margem
+
+    # Salva a data e hora da última execução
+    save_last_run_date()
+
+    # Atualiza a data/hora da última execução na interface
+    st.write(f"Data last update updated to: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
 
 
-st.title("🎈 My new app")
-st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
+
+with open(file_name, "rb") as f:
+    excel_data = f.read()
+
+
+
+
+
+
+
+
+st.download_button(
+    label="Baixar Excel",
+    data=excel_data,
+    file_name= file_name,
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
